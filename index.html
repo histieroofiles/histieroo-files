@@ -526,19 +526,19 @@
       </div>
       <div class="auto-status" id="auto-status">SELECT A FILE BELOW TO REVIEW</div>
       <nav class="review-tabs" id="review-tabs" aria-label="Case review tabs">
-        <button data-page="1">MAIN FILE</button>
-        <button data-page="3">CASE 01 — TGFL</button>
-        <button data-page="7">CASE 02 — DIDDY</button>
-        <button data-page="11">CASE 03 — HAMSTER</button>
-        <button data-page="14">CASE 04 — FILES</button>
-        <button data-page="16">CASE 05 — MATTEO</button>
-        <button data-page="21">END / DISCLAIMER</button>
+        <button data-start="1" data-end="2">MAIN FILE</button>
+        <button data-start="3" data-end="6">CASE 01 — TGFL</button>
+        <button data-start="7" data-end="11">CASE 02 — DIDDY</button>
+        <button data-start="12" data-end="14">CASE 03 — HAMSTER</button>
+        <button data-start="15" data-end="16">CASE 04 — FILES</button>
+        <button data-start="17" data-end="20">CASE 05 — MATTEO</button>
+        <button data-start="21" data-end="21">END / DISCLAIMER</button>
       </nav>
       <div class="viewer-loading" id="viewer-loading">LOADING CLASSIFIED FILE...</div>
       <div class="pdf-pages" id="pdf-pages"></div>
       <div class="viewer-error" id="viewer-error">
         The file could not be displayed here.
-        <a href="histieroo-files-part-1.pdf">Open the PDF directly</a>.
+        <a href="histieroo-files-part-1-no-divider-pages.pdf">Open the PDF directly</a>.
       </div>
     </div>
 
@@ -731,9 +731,9 @@ const reviewTabs = document.getElementById("review-tabs");
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-      pdfDoc = await pdfjsLib.getDocument("histieroo-files-part-1.pdf").promise;
+      pdfDoc = await pdfjsLib.getDocument("histieroo-files-part-1-no-divider-pages.pdf").promise;
 
-      // Nothing is preloaded. A page appears only when its tab is clicked.
+      // Nothing is preloaded. Only the selected file/case pages are loaded when its tab is clicked.
       pdfPages.innerHTML = "";
       highestAppendedPage = 0;
 
@@ -786,24 +786,35 @@ const reviewTabs = document.getElementById("review-tabs");
     autoStatus.textContent = "SELECT A FILE BELOW TO REVIEW";
   }
 
-  reviewTabs.querySelectorAll("button[data-page]").forEach(button => {
+  reviewTabs.querySelectorAll("button[data-start]").forEach(button => {
     button.addEventListener("click", async () => {
-      const pageNumber = Number(button.dataset.page);
+      const startPage = Number(button.dataset.start);
+      const endPage = Number(button.dataset.end);
 
-      // Only one selected PDF page exists at a time.
+      // Clear the previous case. Nothing from other cases stays loaded.
       pdfPages.innerHTML = "";
       renderedPages.clear();
       renderingPages.clear();
       highestAppendedPage = 0;
 
-      const page = await appendAndRenderPage(pageNumber, true);
-
-      if (page) {
-        page.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-
       reviewTabs.querySelectorAll("button").forEach(btn => btn.classList.remove("active"));
       button.classList.add("active");
+
+      autoStatus.textContent =
+        startPage === endPage
+          ? `REVIEWING PAGE ${String(startPage).padStart(2,"0")}`
+          : `REVIEWING PAGES ${String(startPage).padStart(2,"0")}–${String(endPage).padStart(2,"0")}`;
+
+      // Load all pages belonging to the selected case, and only those pages.
+      let firstPage = null;
+      for (let pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
+        const page = await appendAndRenderPage(pageNumber, true);
+        if (!firstPage && page) firstPage = page;
+      }
+
+      if (firstPage) {
+        firstPage.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     });
   });
 
