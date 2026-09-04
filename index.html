@@ -787,93 +787,75 @@
     autoReviewStopped = false;
     autoStatus.textContent = "AUTOMATIC EVIDENCE REVIEW IN PROGRESS";
 
-    await sleep(2200);
+    await sleep(1200);
 
-    for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
-      if (autoReviewStopped) break;
+    let currentPage = 1;
+    let last = performance.now();
+    let preparingNext = false;
 
-      let shell = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
-      if (!shell) {
-        shell = await appendAndRenderPage(pageNumber, true);
-      } else {
-        revealPreparedPage(pageNumber);
-      }
+    await new Promise(resolve => {
+      async function frame(now) {
+        if (autoReviewStopped) return resolve();
 
-      // Ease into the top of the current page.
-      const pageTop = Math.max(0, shell.offsetTop - 18);
-      await smoothScrollTo(pageTop, 220);
-      await sleep(650);
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
 
-      // Start preparing the NEXT page before the current one is finished.
-      // It exists below the current page but remains invisible at first.
-      let nextPrepared = false;
-      let nextRevealed = false;
-      const nextPage = pageNumber + 1;
+        const shell = pdfPages.querySelector(`.pdf-page-shell[data-page="${currentPage}"]`);
 
-      const pageBottom = shell.offsetTop + shell.offsetHeight - window.innerHeight + 90;
-      let last = performance.now();
+        if (shell) {
+          const shellTop = shell.offsetTop;
+          const shellBottom = shellTop + shell.offsetHeight;
+          const viewportBottom = window.scrollY + window.innerHeight;
 
-      await new Promise(resolve => {
-        async function frame(now) {
-          if (autoReviewStopped) return resolve();
-
-          const currentY = window.scrollY;
-          const totalDistance = Math.max(1, pageBottom - pageTop);
-          const progress = Math.max(0, Math.min(1, (currentY - pageTop) / totalDistance));
-
-          // Preload next page around 68% through current page.
+          // Prepare the next page before the viewer reaches the end of this one.
           if (
-            nextPage <= pdfDoc.numPages &&
-            progress >= 0.68 &&
-            !nextPrepared
+            currentPage < pdfDoc.numPages &&
+            viewportBottom >= shellBottom - window.innerHeight * 0.55 &&
+            !preparingNext
           ) {
-            nextPrepared = true;
-            appendAndRenderPage(nextPage, false);
+            preparingNext = true;
+            const nextPage = currentPage + 1;
+
+            appendAndRenderPage(nextPage, false).then(() => {
+              revealPreparedPage(nextPage);
+              preparingNext = false;
+            });
           }
 
-          // Begin the fade/slide reveal before the current page ends.
+          // Once the next page has started entering the viewport, advance the current page marker.
+          const nextShell = pdfPages.querySelector(`.pdf-page-shell[data-page="${currentPage + 1}"]`);
           if (
-            nextPage <= pdfDoc.numPages &&
-            progress >= 0.86 &&
-            !nextRevealed
+            nextShell &&
+            currentPage < pdfDoc.numPages &&
+            viewportBottom >= nextShell.offsetTop + 120
           ) {
-            nextRevealed = true;
-            revealPreparedPage(nextPage);
+            currentPage += 1;
           }
-
-          if (currentY >= pageBottom - 1.5) {
-            window.scrollTo(0, pageBottom);
-            return resolve();
-          }
-
-          const dt = Math.min((now - last) / 1000, 0.05);
-          last = now;
-
-          // Smooth continuous scroll. Slight ease near the bottom.
-          const easedSpeed = progress > 0.82 ? 48 : 58;
-          window.scrollTo(0, currentY + easedSpeed * dt);
-
-          requestAnimationFrame(frame);
         }
 
+        const maxY = document.documentElement.scrollHeight - window.innerHeight;
+
+        // Stop only at the very end after the last page exists.
+        if (
+          currentPage >= pdfDoc.numPages &&
+          highestAppendedPage >= pdfDoc.numPages &&
+          window.scrollY >= maxY - 1.5
+        ) {
+          window.scrollTo(0, maxY);
+          return resolve();
+        }
+
+        // One uninterrupted smooth scroll speed.
+        const pixelsPerSecond = 56;
+        window.scrollTo(0, Math.min(maxY, window.scrollY + pixelsPerSecond * dt));
+
         requestAnimationFrame(frame);
-      });
-
-      if (autoReviewStopped) break;
-
-      // Small cinematic pause while the next page is already visible below.
-      await sleep(650);
-
-      if (nextPage <= pdfDoc.numPages) {
-        // Make sure rendering has finished before we move into it.
-        await appendAndRenderPage(nextPage, true);
       }
-    }
+
+      requestAnimationFrame(frame);
+    });
 
     if (!autoReviewStopped) {
-      const maxY = document.documentElement.scrollHeight - window.innerHeight;
-      await smoothScrollTo(maxY, 85);
-      await sleep(850);
       autoStatus.textContent = "AUTOMATIC REVIEW COMPLETE — USE THE TABS TO REVIEW ANY CASE";
       reviewTabs.classList.add("show");
     }
