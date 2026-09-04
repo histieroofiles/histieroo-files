@@ -381,6 +381,87 @@
       .colon{font-size:30px}
       .label{font-size:8px;letter-spacing:.22em}
     }
+  
+    /* Cinematic one-page-at-a-time reveal */
+    .pdf-pages{
+      background:#0b0b0c;
+      padding:70px 18px 110px;
+    }
+
+    .pdf-page-shell{
+      width:min(920px,92vw);
+      margin:0 auto 90px;
+      background:#101114;
+      box-shadow:0 16px 50px rgba(0,0,0,.48);
+      position:relative;
+      overflow:hidden;
+      opacity:0;
+      transform:translateY(32px) scale(.992);
+      filter:blur(2px);
+      transition:
+        opacity 1.15s ease,
+        transform 1.15s ease,
+        filter 1.15s ease;
+    }
+
+    .pdf-page-shell.reveal{
+      opacity:1;
+      transform:translateY(0) scale(1);
+      filter:blur(0);
+    }
+
+    .pdf-page-shell::before{
+      content:"PREPARING FILE...";
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#4e5157;
+      font-size:10px;
+      letter-spacing:.22em;
+      text-transform:uppercase;
+      background:#101114;
+      z-index:2;
+      transition:opacity .55s ease;
+    }
+
+    .pdf-page-shell.rendered::before{
+      opacity:0;
+      pointer-events:none;
+    }
+
+    .pdf-page{
+      display:block;
+      width:100%;
+      height:100%;
+      background:#fff;
+      opacity:0;
+      transition:opacity .85s ease .15s;
+    }
+
+    .pdf-page-shell.rendered .pdf-page{
+      opacity:1;
+    }
+
+    .page-stage-label{
+      width:min(920px,92vw);
+      margin:0 auto 18px;
+      color:#55585f;
+      text-align:center;
+      font-size:10px;
+      letter-spacing:.28em;
+      text-transform:uppercase;
+      opacity:0;
+      transform:translateY(10px);
+      transition:opacity .7s ease, transform .7s ease;
+    }
+
+    .page-stage-label.show{
+      opacity:1;
+      transform:translateY(0);
+    }
+
   </style>
 </head>
 <body>
@@ -541,29 +622,60 @@
 
   let pdfLoaded = false;
   let pdfDoc = null;
-  let pageObserver = null;
   const renderedPages = new Set();
   const renderingPages = new Map();
   let autoReviewStarted = false;
   let autoReviewStopped = false;
+  let highestAppendedPage = 0;
 
-  async function renderSinglePage(pageNumber) {
-    if (!pdfDoc || renderedPages.has(pageNumber)) return;
-    if (renderingPages.has(pageNumber)) return renderingPages.get(pageNumber);
+  async function appendAndRenderPage(pageNumber) {
+    if (!pdfDoc || pageNumber < 1 || pageNumber > pdfDoc.numPages) return null;
+
+    let shell = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
+
+    if (!shell) {
+      const page = await pdfDoc.getPage(pageNumber);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const targetWidth = Math.min(920, window.innerWidth - 60);
+      const scale = targetWidth / baseViewport.width;
+      const viewport = page.getViewport({ scale });
+
+      const label = document.createElement("div");
+      label.className = "page-stage-label";
+      label.textContent = `FILE HF-001 • PAGE ${String(pageNumber).padStart(2,"0")} OF ${String(pdfDoc.numPages).padStart(2,"0")}`;
+      pdfPages.appendChild(label);
+
+      shell = document.createElement("div");
+      shell.className = "pdf-page-shell";
+      shell.dataset.page = String(pageNumber);
+      shell.style.width = `${Math.floor(viewport.width)}px`;
+      shell.style.height = `${Math.floor(viewport.height)}px`;
+      pdfPages.appendChild(shell);
+
+      highestAppendedPage = Math.max(highestAppendedPage, pageNumber);
+
+      // Let the new page "materialize" instead of popping in.
+      requestAnimationFrame(() => {
+        label.classList.add("show");
+        requestAnimationFrame(() => shell.classList.add("reveal"));
+      });
+    }
+
+    if (renderedPages.has(pageNumber)) return shell;
+    if (renderingPages.has(pageNumber)) {
+      await renderingPages.get(pageNumber);
+      return shell;
+    }
 
     const task = (async () => {
-      const shell = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
-      if (!shell) return;
-
       try {
         const page = await pdfDoc.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
-
         const shellWidth = shell.clientWidth || Math.min(920, window.innerWidth - 60);
         const scale = shellWidth / baseViewport.width;
         const viewport = page.getViewport({ scale });
 
-        const outputScale = window.devicePixelRatio || 1;
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
         const canvas = document.createElement("canvas");
         canvas.className = "pdf-page";
         canvas.width = Math.floor(viewport.width * outputScale);
@@ -594,7 +706,8 @@
     })();
 
     renderingPages.set(pageNumber, task);
-    return task;
+    await task;
+    return shell;
   }
 
   async function renderPDF() {
@@ -606,44 +719,10 @@
 
       pdfDoc = await pdfjsLib.getDocument("histieroo-files-part-1-no-divider-pages.pdf").promise;
 
-      // Build lightweight page placeholders first. Pages render only as they approach the screen.
-      const firstPage = await pdfDoc.getPage(1);
-      const baseViewport = firstPage.getViewport({ scale: 1 });
-      const targetWidth = Math.min(920, window.innerWidth - 60);
-      const scale = targetWidth / baseViewport.width;
-      const sampleViewport = firstPage.getViewport({ scale });
-      const ratio = sampleViewport.height / sampleViewport.width;
-
-      const fragment = document.createDocumentFragment();
-
-      for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
-        const shell = document.createElement("div");
-        shell.className = "pdf-page-shell";
-        shell.dataset.page = String(pageNumber);
-        shell.style.height = `${Math.round(targetWidth * ratio)}px`;
-        fragment.appendChild(shell);
-      }
-
-      pdfPages.appendChild(fragment);
-
-      // Render a page only when it is about to enter the viewport.
-      pageObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const pageNumber = Number(entry.target.dataset.page);
-            renderSinglePage(pageNumber);
-          }
-        });
-      }, {
-        root: null,
-        rootMargin: "45% 0px 45% 0px",
-        threshold: 0.01
-      });
-
-      pdfPages.querySelectorAll(".pdf-page-shell").forEach(shell => pageObserver.observe(shell));
-
-      // Make sure page 1 is ready immediately.
-      await renderSinglePage(1);
+      // IMPORTANT: Only page 1 exists at first.
+      pdfPages.innerHTML = "";
+      highestAppendedPage = 0;
+      await appendAndRenderPage(1);
 
       viewerLoading.style.display = "none";
       pdfLoaded = true;
@@ -666,37 +745,57 @@
     autoReviewStopped = false;
     autoStatus.textContent = "AUTOMATIC EVIDENCE REVIEW IN PROGRESS";
 
-    // Give the first page a moment on screen before movement begins.
-    await sleep(1800);
+    // Let page 1 settle before movement starts.
+    await sleep(2200);
 
-    const pixelsPerSecond = 90;
-    let last = performance.now();
+    for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
+      if (autoReviewStopped) break;
 
-    await new Promise(resolve => {
-      function step(now) {
-        if (autoReviewStopped) return resolve();
-        const maxY = document.documentElement.scrollHeight - window.innerHeight;
-        if (window.scrollY >= maxY - 2) {
-          window.scrollTo(0, maxY);
-          return resolve();
-        }
-        const dt = Math.min((now - last) / 1000, .05);
-        last = now;
-        window.scrollBy(0, pixelsPerSecond * dt);
-        requestAnimationFrame(step);
+      let shell = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
+      if (!shell) shell = await appendAndRenderPage(pageNumber);
+
+      // Bring the current page into focus.
+      shell.scrollIntoView({ behavior: "smooth", block: "start" });
+      await sleep(1350);
+
+      // Slowly read down the current page.
+      const pageBottom = shell.offsetTop + shell.offsetHeight - window.innerHeight + 70;
+      while (!autoReviewStopped && window.scrollY < pageBottom - 3) {
+        window.scrollBy(0, 2);
+        await sleep(28);
       }
-      requestAnimationFrame(step);
-    });
 
-    autoStatus.textContent = "AUTOMATIC REVIEW COMPLETE — USE THE TABS TO REVIEW ANY CASE";
-    reviewTabs.classList.add("show");
+      if (autoReviewStopped) break;
+
+      // Brief pause at the end of each page.
+      await sleep(700);
+
+      // Only now does the next page get created/revealed.
+      if (pageNumber < pdfDoc.numPages) {
+        await appendAndRenderPage(pageNumber + 1);
+        await sleep(900);
+      }
+    }
+
+    if (!autoReviewStopped) {
+      const maxY = document.documentElement.scrollHeight - window.innerHeight;
+      window.scrollTo({ top: maxY, behavior: "smooth" });
+      await sleep(900);
+      autoStatus.textContent = "AUTOMATIC REVIEW COMPLETE — USE THE TABS TO REVIEW ANY CASE";
+      reviewTabs.classList.add("show");
+    }
   }
 
   reviewTabs.querySelectorAll("button[data-page]").forEach(button => {
     button.addEventListener("click", async () => {
       autoReviewStopped = true;
       const pageNumber = Number(button.dataset.page);
-      await renderSinglePage(pageNumber);
+
+      // Normally every page exists after the automatic review. If not, append up to it.
+      while (highestAppendedPage < pageNumber) {
+        await appendAndRenderPage(highestAppendedPage + 1);
+      }
+
       const page = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
       if (page) page.scrollIntoView({ behavior: "smooth", block: "start" });
     });
