@@ -574,19 +574,17 @@
 
   async function unlock(){
     if (els.unlocked.style.display === "block") return;
+
+    // Hide countdown, show the RELEASED landing screen.
     els.countdown.style.display = "none";
     els.unlocked.style.display = "block";
     document.title = "The Histieroo Files — Released";
 
-    // Automatically open the archive when the countdown reaches zero.
-    releaseCard.style.display = "none";
-    documentViewer.style.display = "block";
-    documentViewer.scrollIntoView({ behavior: "auto", block: "start" });
-    const loaded = await renderPDF();
-    if (loaded || pdfLoaded) {
-      reviewTabs.classList.add("show");
-      autoStatus.textContent = "SELECT A FILE BELOW TO REVIEW";
-    }
+    // IMPORTANT: do NOT open the files automatically.
+    releaseCard.style.display = "block";
+    documentViewer.style.display = "none";
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function tick(){
@@ -814,11 +812,13 @@ const reviewTabs = document.getElementById("review-tabs");
       releaseCard.style.display = "none";
       documentViewer.style.display = "block";
       documentViewer.scrollIntoView({ behavior: "smooth", block: "start" });
+
       const loaded = await renderPDF();
+
       if (loaded || pdfLoaded) {
-      reviewTabs.classList.add("show");
-      autoStatus.textContent = "SELECT A FILE BELOW TO REVIEW";
-    }
+        reviewTabs.classList.add("show");
+        autoStatus.textContent = "SELECT A FILE BELOW TO REVIEW";
+      }
     });
   }
 
