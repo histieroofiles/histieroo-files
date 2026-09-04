@@ -538,7 +538,7 @@
       <div class="pdf-pages" id="pdf-pages"></div>
       <div class="viewer-error" id="viewer-error">
         The file could not be displayed here.
-        <a href="histieroo-files-part-1-no-divider-pages.pdf">Open the PDF directly</a>.
+        <a href="histieroo-files-part-1.pdf">Open the PDF directly</a>.
       </div>
     </div>
 
@@ -731,7 +731,7 @@ const reviewTabs = document.getElementById("review-tabs");
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-      pdfDoc = await pdfjsLib.getDocument("histieroo-files-part-1-no-divider-pages.pdf").promise;
+      pdfDoc = await pdfjsLib.getDocument("histieroo-files-part-1.pdf").promise;
 
       // Nothing is preloaded. Only the selected file/case pages are loaded when its tab is clicked.
       pdfPages.innerHTML = "";
