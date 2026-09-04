@@ -240,28 +240,42 @@
       text-transform:uppercase;
     }
 
-    .pdf-frame{
+    .pdf-pages{
+      background:#0b0b0c;
+      padding:28px 18px 48px;
+    }
+
+    .pdf-page{
       display:block;
-      width:100%;
-      height:78vh;
-      min-height:620px;
-      border:0;
-      background:#202124;
+      width:min(920px,100%);
+      height:auto;
+      margin:0 auto 26px;
+      background:white;
+      box-shadow:0 12px 35px rgba(0,0,0,.45);
     }
 
-    .pdf-fallback{
+    .viewer-loading{
+      padding:50px 20px;
+      text-align:center;
+      color:#7c7f85;
+      letter-spacing:.18em;
+      text-transform:uppercase;
+      font-size:11px;
+    }
+
+    .viewer-error{
+      padding:24px;
+      text-align:center;
+      color:#b9a3a3;
+      line-height:1.5;
       display:none;
-      margin:0;
-      padding:12px 18px;
-      color:#777a80;
-      font-size:12px;
     }
 
-    .pdf-fallback a{
-      color:#b8b8b6;
+    .viewer-error a{
+      color:#ddd;
     }
 
-    .disclaimer{
+.disclaimer{
       margin-top:32px;
       border:1px solid #3a2c2c;
       background:#130f10;
@@ -364,21 +378,19 @@
         <span>THE HISTIEROO FILES — PART I</span>
         <button id="close-doc" type="button">CLOSE FILE</button>
       </div>
-      <iframe
-        class="pdf-frame"
-        src="histieroo-files-part-1.pdf#view=FitH"
-        title="The Histieroo Files — Part I">
-      </iframe>
-      <p class="pdf-fallback">
-        If the document does not display, 
-        <a href="histieroo-files-part-1.pdf">open the PDF here</a>.
-      </p>
+      <div class="viewer-loading" id="viewer-loading">LOADING CLASSIFIED FILE...</div>
+      <div class="pdf-pages" id="pdf-pages"></div>
+      <div class="viewer-error" id="viewer-error">
+        The file could not be displayed here.
+        <a href="histieroo-files-part-1.pdf">Open the PDF directly</a>.
+      </div>
     </div>
 
     <div class="footer">HF-001 • PART I • © 2026 RELM</div>
   </section>
 </main>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
   /*
     =========================================================
@@ -386,12 +398,12 @@
     =========================================================
 
     Example:
-    const RELEASE_AT = new Date(Date.now() + 50 * 1000);
+    const RELEASE_AT = new Date(Date.now() + 10 * 1000);
 
     -07:00 = Pacific Daylight Time.
     Change this to the exact date/time you want.
   */
-  const RELEASE_AT = new Date(Date.now() + 50 * 1000);
+  const RELEASE_AT = new Date(Date.now() + 10 * 1000);
 
   const els = {
     days: document.getElementById("days"),
@@ -440,12 +452,67 @@
   const closeDoc = document.getElementById("close-doc");
   const releaseCard = document.getElementById("release-card");
   const documentViewer = document.getElementById("document-viewer");
+  const pdfPages = document.getElementById("pdf-pages");
+  const viewerLoading = document.getElementById("viewer-loading");
+  const viewerError = document.getElementById("viewer-error");
+
+  let pdfLoaded = false;
+
+  async function renderPDF() {
+    if (pdfLoaded) return;
+
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+      const pdf = await pdfjsLib.getDocument("histieroo-files-part-1.pdf").promise;
+
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const targetWidth = Math.min(920, window.innerWidth - 60);
+        const scale = targetWidth / baseViewport.width;
+        const viewport = page.getViewport({ scale });
+
+        const outputScale = window.devicePixelRatio || 1;
+
+        const canvas = document.createElement("canvas");
+        canvas.className = "pdf-page";
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+        const ctx = canvas.getContext("2d");
+        const transform = outputScale !== 1
+          ? [outputScale, 0, 0, outputScale, 0, 0]
+          : null;
+
+        pdfPages.appendChild(canvas);
+
+        await page.render({
+          canvasContext: ctx,
+          transform,
+          viewport
+        }).promise;
+      }
+
+      viewerLoading.style.display = "none";
+      pdfLoaded = true;
+    } catch (error) {
+      console.error(error);
+      viewerLoading.style.display = "none";
+      viewerError.style.display = "block";
+    }
+  }
 
   if (openDoc) {
-    openDoc.addEventListener("click", () => {
+    openDoc.addEventListener("click", async () => {
       releaseCard.style.display = "none";
       documentViewer.style.display = "block";
       documentViewer.scrollIntoView({ behavior: "smooth", block: "start" });
+      await renderPDF();
     });
   }
 
