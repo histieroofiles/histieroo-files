@@ -430,7 +430,7 @@
       <div class="pdf-pages" id="pdf-pages"></div>
       <div class="viewer-error" id="viewer-error">
         The file could not be displayed here.
-        <a href="histieroo-files-part-1-no-divider-pages.pdf">Open the PDF directly</a>.
+        <a href="histieroo-files-part-1.pdf">Open the PDF directly</a>.
       </div>
     </div>
 
@@ -525,7 +525,7 @@
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-      const pdf = await pdfjsLib.getDocument("histieroo-files-part-1-no-divider-pages.pdf").promise;
+      const pdf = await pdfjsLib.getDocument("histieroo-files-part-1.pdf").promise;
 
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         const page = await pdf.getPage(pageNumber);
