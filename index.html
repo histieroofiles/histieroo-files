@@ -245,13 +245,38 @@
       padding:28px 18px 48px;
     }
 
+    .pdf-page-shell{
+      width:min(920px,100%);
+      margin:0 auto 26px;
+      background:#121316;
+      box-shadow:0 12px 35px rgba(0,0,0,.45);
+      position:relative;
+      overflow:hidden;
+    }
+
+    .pdf-page-shell::before{
+      content:"LOADING PAGE...";
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#4e5157;
+      font-size:10px;
+      letter-spacing:.2em;
+      text-transform:uppercase;
+      pointer-events:none;
+    }
+
+    .pdf-page-shell.rendered::before{
+      display:none;
+    }
+
     .pdf-page{
       display:block;
-      width:min(920px,100%);
-      height:auto;
-      margin:0 auto 26px;
+      width:100%;
+      height:100%;
       background:white;
-      box-shadow:0 12px 35px rgba(0,0,0,.45);
     }
 
     .viewer-loading{
@@ -430,7 +455,7 @@
       <div class="pdf-pages" id="pdf-pages"></div>
       <div class="viewer-error" id="viewer-error">
         The file could not be displayed here.
-        <a href="histieroo-files-part-1.pdf">Open the PDF directly</a>.
+        <a href="histieroo-files-part-1-no-divider-pages.pdf">Open the PDF directly</a>.
       </div>
     </div>
 
@@ -515,31 +540,32 @@
   const autoStatus = document.getElementById("auto-status");
 
   let pdfLoaded = false;
+  let pdfDoc = null;
+  let pageObserver = null;
+  const renderedPages = new Set();
+  const renderingPages = new Map();
   let autoReviewStarted = false;
   let autoReviewStopped = false;
 
-  async function renderPDF() {
-    if (pdfLoaded) return;
+  async function renderSinglePage(pageNumber) {
+    if (!pdfDoc || renderedPages.has(pageNumber)) return;
+    if (renderingPages.has(pageNumber)) return renderingPages.get(pageNumber);
 
-    try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const task = (async () => {
+      const shell = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
+      if (!shell) return;
 
-      const pdf = await pdfjsLib.getDocument("histieroo-files-part-1.pdf").promise;
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-        const page = await pdf.getPage(pageNumber);
-
+      try {
+        const page = await pdfDoc.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
-        const targetWidth = Math.min(920, window.innerWidth - 60);
-        const scale = targetWidth / baseViewport.width;
+
+        const shellWidth = shell.clientWidth || Math.min(920, window.innerWidth - 60);
+        const scale = shellWidth / baseViewport.width;
         const viewport = page.getViewport({ scale });
 
         const outputScale = window.devicePixelRatio || 1;
-
         const canvas = document.createElement("canvas");
         canvas.className = "pdf-page";
-        canvas.dataset.page = String(pageNumber);
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -550,14 +576,74 @@
           ? [outputScale, 0, 0, outputScale, 0, 0]
           : null;
 
-        pdfPages.appendChild(canvas);
+        shell.replaceChildren(canvas);
 
         await page.render({
           canvasContext: ctx,
           transform,
           viewport
         }).promise;
+
+        shell.classList.add("rendered");
+        renderedPages.add(pageNumber);
+      } catch (err) {
+        console.error(`Could not render page ${pageNumber}`, err);
+      } finally {
+        renderingPages.delete(pageNumber);
       }
+    })();
+
+    renderingPages.set(pageNumber, task);
+    return task;
+  }
+
+  async function renderPDF() {
+    if (pdfLoaded) return true;
+
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+      pdfDoc = await pdfjsLib.getDocument("histieroo-files-part-1-no-divider-pages.pdf").promise;
+
+      // Build lightweight page placeholders first. Pages render only as they approach the screen.
+      const firstPage = await pdfDoc.getPage(1);
+      const baseViewport = firstPage.getViewport({ scale: 1 });
+      const targetWidth = Math.min(920, window.innerWidth - 60);
+      const scale = targetWidth / baseViewport.width;
+      const sampleViewport = firstPage.getViewport({ scale });
+      const ratio = sampleViewport.height / sampleViewport.width;
+
+      const fragment = document.createDocumentFragment();
+
+      for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
+        const shell = document.createElement("div");
+        shell.className = "pdf-page-shell";
+        shell.dataset.page = String(pageNumber);
+        shell.style.height = `${Math.round(targetWidth * ratio)}px`;
+        fragment.appendChild(shell);
+      }
+
+      pdfPages.appendChild(fragment);
+
+      // Render a page only when it is about to enter the viewport.
+      pageObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const pageNumber = Number(entry.target.dataset.page);
+            renderSinglePage(pageNumber);
+          }
+        });
+      }, {
+        root: null,
+        rootMargin: "45% 0px 45% 0px",
+        threshold: 0.01
+      });
+
+      pdfPages.querySelectorAll(".pdf-page-shell").forEach(shell => pageObserver.observe(shell));
+
+      // Make sure page 1 is ready immediately.
+      await renderSinglePage(1);
 
       viewerLoading.style.display = "none";
       pdfLoaded = true;
@@ -566,6 +652,7 @@
       console.error(error);
       viewerLoading.style.display = "none";
       viewerError.style.display = "block";
+      return false;
     }
   }
 
@@ -606,9 +693,11 @@
   }
 
   reviewTabs.querySelectorAll("button[data-page]").forEach(button => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       autoReviewStopped = true;
-      const page = pdfPages.querySelector(`[data-page="${button.dataset.page}"]`);
+      const pageNumber = Number(button.dataset.page);
+      await renderSinglePage(pageNumber);
+      const page = pdfPages.querySelector(`.pdf-page-shell[data-page="${pageNumber}"]`);
       if (page) page.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
