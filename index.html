@@ -275,6 +275,44 @@
       color:#ddd;
     }
 
+    .review-tabs{
+      display:none;
+      position:sticky;
+      top:0;
+      z-index:20;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:center;
+      padding:12px;
+      background:rgba(12,13,15,.96);
+      border-bottom:1px solid var(--line);
+      backdrop-filter:blur(8px);
+    }
+    .review-tabs.show{display:flex}
+    .review-tabs button{
+      border:1px solid #34373d;
+      background:#151619;
+      color:#aeb0b5;
+      padding:9px 12px;
+      border-radius:6px;
+      cursor:pointer;
+      font-family:inherit;
+      font-size:10px;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+    }
+    .review-tabs button:hover{color:#fff;border-color:#666}
+    .auto-status{
+      text-align:center;
+      padding:10px 16px;
+      color:#70737a;
+      font-size:10px;
+      letter-spacing:.18em;
+      text-transform:uppercase;
+      background:#101114;
+      border-bottom:1px solid var(--line);
+    }
+
 .disclaimer{
       margin-top:32px;
       border:1px solid #3a2c2c;
@@ -378,11 +416,21 @@
         <span>THE HISTIEROO FILES — PART I</span>
         <button id="close-doc" type="button">CLOSE FILE</button>
       </div>
+      <div class="auto-status" id="auto-status">PREPARING AUTOMATIC EVIDENCE REVIEW...</div>
+      <nav class="review-tabs" id="review-tabs" aria-label="Case review tabs">
+        <button data-page="1">MAIN FILE</button>
+        <button data-page="3">CASE 01 — TGFL</button>
+        <button data-page="7">CASE 02 — DIDDY</button>
+        <button data-page="11">CASE 03 — HAMSTER</button>
+        <button data-page="14">CASE 04 — FILES</button>
+        <button data-page="16">CASE 05 — MATTEO</button>
+        <button data-page="21">END / DISCLAIMER</button>
+      </nav>
       <div class="viewer-loading" id="viewer-loading">LOADING CLASSIFIED FILE...</div>
       <div class="pdf-pages" id="pdf-pages"></div>
       <div class="viewer-error" id="viewer-error">
         The file could not be displayed here.
-        <a href="histieroo-files-part-1.pdf">Open the PDF directly</a>.
+        <a href="histieroo-files-part-1-no-divider-pages.pdf">Open the PDF directly</a>.
       </div>
     </div>
 
@@ -416,10 +464,18 @@
 
   const pad = (n) => String(n).padStart(2, "0");
 
-  function unlock(){
+  async function unlock(){
+    if (els.unlocked.style.display === "block") return;
     els.countdown.style.display = "none";
     els.unlocked.style.display = "block";
     document.title = "The Histieroo Files — Released";
+
+    // Automatically open the archive when the countdown reaches zero.
+    releaseCard.style.display = "none";
+    documentViewer.style.display = "block";
+    documentViewer.scrollIntoView({ behavior: "auto", block: "start" });
+    const loaded = await renderPDF();
+    if (loaded || pdfLoaded) startAutomaticReview();
   }
 
   function tick(){
@@ -455,8 +511,12 @@
   const pdfPages = document.getElementById("pdf-pages");
   const viewerLoading = document.getElementById("viewer-loading");
   const viewerError = document.getElementById("viewer-error");
+  const reviewTabs = document.getElementById("review-tabs");
+  const autoStatus = document.getElementById("auto-status");
 
   let pdfLoaded = false;
+  let autoReviewStarted = false;
+  let autoReviewStopped = false;
 
   async function renderPDF() {
     if (pdfLoaded) return;
@@ -465,7 +525,7 @@
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-      const pdf = await pdfjsLib.getDocument("histieroo-files-part-1.pdf").promise;
+      const pdf = await pdfjsLib.getDocument("histieroo-files-part-1-no-divider-pages.pdf").promise;
 
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         const page = await pdf.getPage(pageNumber);
@@ -479,6 +539,7 @@
 
         const canvas = document.createElement("canvas");
         canvas.className = "pdf-page";
+        canvas.dataset.page = String(pageNumber);
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -500,6 +561,7 @@
 
       viewerLoading.style.display = "none";
       pdfLoaded = true;
+      return true;
     } catch (error) {
       console.error(error);
       viewerLoading.style.display = "none";
@@ -507,17 +569,63 @@
     }
   }
 
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function startAutomaticReview() {
+    if (autoReviewStarted) return;
+    autoReviewStarted = true;
+    autoReviewStopped = false;
+    autoStatus.textContent = "AUTOMATIC EVIDENCE REVIEW IN PROGRESS";
+
+    // Give the first page a moment on screen before movement begins.
+    await sleep(1800);
+
+    const pixelsPerSecond = 90;
+    let last = performance.now();
+
+    await new Promise(resolve => {
+      function step(now) {
+        if (autoReviewStopped) return resolve();
+        const maxY = document.documentElement.scrollHeight - window.innerHeight;
+        if (window.scrollY >= maxY - 2) {
+          window.scrollTo(0, maxY);
+          return resolve();
+        }
+        const dt = Math.min((now - last) / 1000, .05);
+        last = now;
+        window.scrollBy(0, pixelsPerSecond * dt);
+        requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+
+    autoStatus.textContent = "AUTOMATIC REVIEW COMPLETE — USE THE TABS TO REVIEW ANY CASE";
+    reviewTabs.classList.add("show");
+  }
+
+  reviewTabs.querySelectorAll("button[data-page]").forEach(button => {
+    button.addEventListener("click", () => {
+      autoReviewStopped = true;
+      const page = pdfPages.querySelector(`[data-page="${button.dataset.page}"]`);
+      if (page) page.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
   if (openDoc) {
     openDoc.addEventListener("click", async () => {
       releaseCard.style.display = "none";
       documentViewer.style.display = "block";
       documentViewer.scrollIntoView({ behavior: "smooth", block: "start" });
-      await renderPDF();
+      const loaded = await renderPDF();
+      if (loaded || pdfLoaded) startAutomaticReview();
     });
   }
 
   if (closeDoc) {
     closeDoc.addEventListener("click", () => {
+      autoReviewStopped = true;
       documentViewer.style.display = "none";
       releaseCard.style.display = "block";
       releaseCard.scrollIntoView({ behavior: "smooth", block: "center" });
